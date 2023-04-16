@@ -95,7 +95,7 @@ if __name__ == '__main__':
                     features = torch.cat(features, dim=0).numpy()
                     # Calculate pairwise cosine similarities between features
                     pairwise_cosine_similarities = cosine_similarity(features)
-                    # Zero the diagonal and select the upper triangle of similarities for eliminating duplicate pairs
+                    # Zero the diagonal and select the upper triangle of cosine similarities for eliminating duplicate pairs
                     np.fill_diagonal(pairwise_cosine_similarities, 0)
                     pairwise_cosine_similarities = np.triu(pairwise_cosine_similarities)
 
