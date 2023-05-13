@@ -31,6 +31,7 @@ def load_feature_extractor(model_name, pretrained, model_args):
         pretrained=pretrained,
         **model_args
     )
+    # Override model.head layer in transformer models so the output will be features
     model.head = nn.Identity()
     model.eval()
 
@@ -69,8 +70,10 @@ def extract_features(inputs, model, pooling_type, device, amp):
         if amp:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                 if pooling_type is not None:
+                    # Use forward features if pooling type is specified (convolutional models)
                     features = model.forward_features(inputs)
                 else:
+                    # Use forward if pooling type is not specified (transformer models)
                     features = model(inputs)
         else:
             if pooling_type is not None:
