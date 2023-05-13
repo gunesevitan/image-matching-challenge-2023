@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import timm
 
 
-def load_feature_extractor(model_name, pretrained, model_args, device):
+def load_feature_extractor(model_name, pretrained, model_args):
 
     """
     Load specified pretrained model for feature extraction
@@ -20,9 +20,6 @@ def load_feature_extractor(model_name, pretrained, model_args, device):
     model_args: dict
         Dictionary of model keyword arguments
 
-    device: torch.device
-        Location of the model
-
     Returns
     -------
     model: torch.nn.Module
@@ -35,7 +32,6 @@ def load_feature_extractor(model_name, pretrained, model_args, device):
         **model_args
     )
     model.head = nn.Identity()
-    model.to(device)
     model.eval()
 
     return model
