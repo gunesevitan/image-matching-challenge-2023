@@ -309,7 +309,7 @@ def evaluate(df, verbose=False):
         df_scores = pd.concat((
             df_scores,
             pd.DataFrame(
-                data=[[scene, dataset, len(scene_rotation_errors), scene_maa, scene_rotation_maa, scene_translation_maa]],
+                data=[[dataset, scene, len(scene_rotation_errors), scene_maa, scene_rotation_maa, scene_translation_maa]],
                 columns=['dataset', 'scene', 'image_pairs', 'maa', 'rotation_maa', 'translation_maa']
             )
         ), axis=0)
