@@ -1,10 +1,13 @@
 import numpy as np
+import cv2
 from sklearn.metrics.pairwise import cosine_similarity
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, SequentialSampler
 import timm
+import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 
 import datasets
 
@@ -40,44 +43,6 @@ def load_feature_extractor(model_name, pretrained, model_args):
     model.head = nn.Identity()
 
     return model
-
-
-def prepare_dataloader(image_paths, transforms, batch_size, num_workers):
-
-    """
-    Prepare data loader for inference
-
-    Parameters
-    ----------
-    image_paths: list of shape (n_images)
-        List of image paths
-
-    transforms: dict
-        Transform pipeline
-
-    batch_size: int
-        Batch size of the data loader
-
-    num_workers: int
-        Number of workers of the data loader
-
-    Returns
-    -------
-    data_loader: torch.utils.data.DataLoader
-        Data loader
-    """
-
-    dataset = datasets.ImageDataset(image_paths=image_paths, transforms=transforms)
-    data_loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        sampler=SequentialSampler(dataset),
-        pin_memory=False,
-        drop_last=False,
-        num_workers=num_workers
-    )
-
-    return data_loader
 
 
 def extract_features(inputs, model, pooling_type, device, amp):
@@ -176,3 +141,76 @@ def select_images(image_paths, image_selection_features, image_count):
     image_paths = image_paths[sorting_idx][:image_count].tolist()
 
     return image_paths
+
+
+def prepare_dataloader(image_paths, transforms, batch_size, num_workers):
+
+    """
+    Prepare data loader for inference
+
+    Parameters
+    ----------
+    image_paths: list of shape (n_images)
+        List of image paths
+
+    transforms: dict
+        Transform pipeline
+
+    batch_size: int
+        Batch size of the data loader
+
+    num_workers: int
+        Number of workers of the data loader
+
+    Returns
+    -------
+    data_loader: torch.utils.data.DataLoader
+        Data loader
+    """
+
+    dataset = datasets.ImageDataset(image_paths=image_paths, transforms=transforms)
+    data_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=SequentialSampler(dataset),
+        pin_memory=False,
+        drop_last=False,
+        num_workers=num_workers
+    )
+
+    return data_loader
+
+
+def create_image_selection_transforms(**transform_parameters):
+
+    """
+    Create transformation pipeline for image selection
+
+    Parameters
+    ----------
+    transform_parameters: dict
+        Dictionary of transform parameters
+
+    Returns
+    -------
+    transforms: dict
+        Transform pipeline for image selection
+    """
+
+    image_selection_transforms = A.Compose([
+        A.Resize(
+            height=transform_parameters['resize_height'],
+            width=transform_parameters['resize_width'],
+            interpolation=cv2.INTER_NEAREST,
+            always_apply=True
+        ),
+        A.Normalize(
+            mean=transform_parameters['normalize_mean'],
+            std=transform_parameters['normalize_std'],
+            max_pixel_value=transform_parameters['normalize_max_pixel_value'],
+            always_apply=True
+        ),
+        ToTensorV2(always_apply=True)
+    ])
+
+    return image_selection_transforms
