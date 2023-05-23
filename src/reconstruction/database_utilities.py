@@ -1,9 +1,11 @@
-import os
 import h5py
+from collections import defaultdict
+from copy import deepcopy
 from tqdm import tqdm
 from PIL import Image
 import numpy as np
 import pandas as pd
+import torch
 import sqlite3
 
 import camera_utilities
@@ -99,13 +101,13 @@ def blob_to_array(x):
 
 
 def array_to_blob(x):
-    return np.asarray(x, np.float64).tobytes()
+    return np.asarray(x).tobytes()
 
 
-def image_ids_to_pair_id(image_id1, image_id2):
-    if image_id1 > image_id2:
-        image_id1, image_id2 = image_id2, image_id1
-    return image_id1 * MAX_IMAGE_ID + image_id2
+def image_ids_to_pair_id(image1_id, image2_id):
+    if image1_id > image2_id:
+        image1_id, image2_id = image2_id, image1_id
+    return image1_id * MAX_IMAGE_ID + image2_id
 
 
 def pair_id_to_image_ids(pair_id):
@@ -117,8 +119,8 @@ def pair_id_to_image_ids(pair_id):
 class COLMAPDatabase(sqlite3.Connection):
 
     @staticmethod
-    def connect(database_path):
-        return sqlite3.connect(database_path, factory=COLMAPDatabase)
+    def connect(database_path, uri):
+        return sqlite3.connect(database_path, uri=uri, factory=COLMAPDatabase)
 
     def __init__(self, *args, **kwargs):
 
@@ -200,7 +202,7 @@ class COLMAPDatabase(sqlite3.Connection):
 
         return cursor.lastrowid
 
-    def add_image(self, image_id, name, camera_id, prior_q=np.zeros(4), prior_t=np.zeros(3), ):
+    def add_image(self, image_id, name, camera_id, prior_q=np.zeros(4), prior_t=np.zeros(3)):
 
         cursor = self.execute(
             'INSERT INTO images VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -266,7 +268,7 @@ class COLMAPDatabase(sqlite3.Connection):
             )
         )
 
-    def add_two_view_geometries(self, image1_id, image2_id, matches, config=2, F=np.eye(3), E=np.eye(3), H=np.eye(3), ):
+    def add_two_view_geometries(self, image1_id, image2_id, matches, config=2, F=np.eye(3), E=np.eye(3), H=np.eye(3)):
 
         if image1_id > image2_id:
             matches = matches[:, ::-1]
@@ -293,57 +295,216 @@ class COLMAPDatabase(sqlite3.Connection):
         )
 
 
-def create_camera(colmap_database, image_path, camera_model):
+def get_first_indices(x, dim=0):
 
-    image = Image.open(image_path)
-    width, height = image.size
+    """
+    Get indices where values appear first
 
-    focal_length = camera_utilities.get_focal_length(image_path=image_path)
+    Parameters
+    ----------
+    x: torch.Tensor
+        N-dimensional torch tensor
 
-    if camera_model == 'simple-pinhole':
-        model = 0
-        params = np.array([focal_length, width / 2, height / 2])
-    elif camera_model == 'pinhole':
-        model = 1
-        params = np.array([focal_length, focal_length, width / 2, height / 2])
-    elif camera_model == 'simple-radial':
-        model = 2
-        params = np.array([focal_length, width / 2, height / 2, 0.1])
-    elif camera_model == 'opencv':
-        model = 4
-        params = np.array([focal_length, focal_length, width / 2, height / 2, 0., 0., 0., 0.])
-    else:
-        raise ValueError(f'Invalid camera model: {camera_model}')
+    dim: int
+        Dimension of the unique operation
 
-    return colmap_database.add_camera(
-        camera_id=None,
-        model=model,
-        width=width,
-        height=height,
-        params=params,
-        prior_focal_length=False
-    )
+    Returns
+    -------
+    first_indices: torch.Tensor
+        Indices where values appear first
+    """
+
+    _, idx, counts = torch.unique(x, dim=dim, sorted=True, return_inverse=True, return_counts=True)
+    _, sorted_idx = torch.sort(idx, stable=True)
+    counts_cumsum = counts.cumsum(0)
+    counts_cumsum = torch.cat((torch.tensor([0], device=counts_cumsum.device), counts_cumsum[:-1]))
+    first_indices = sorted_idx[counts_cumsum]
+
+    return first_indices
 
 
-def add_keypoints(colmap_database, h5_path, image_path, img_ext, camera_model, single_camera = True):
+def write_matches(image_paths, image_pair_indices, first_image_keypoints, second_image_keypoints, output_directory):
 
-    keypoint_f = h5py.File(os.path.join(h5_path, 'keypoints.h5'), 'r')
+    """
+    Write matches as h5 datasets for COLMAP
+
+    Parameters
+    ----------
+    image_paths: list of shape (n_images)
+        List of image paths
+
+    image_pair_indices: list of shape (n_image_pairs)
+        List of tuples of image pair indices
+
+    first_image_keypoints: list of shape (n_image_pairs)
+        List of first image keypoints
+
+    second_image_keypoints: list of shape (n_image_pairs)
+        List of second image keypoints
+
+    output_directory: str or pathlib.Path object
+        Path of the output directory
+    """
+
+    with h5py.File(output_directory / 'loftr_matches.h5', mode='w') as f:
+        for matching_index, image_pair_index in enumerate(image_pair_indices):
+            first_image_path, second_image_path = image_paths[image_pair_index[0]], image_paths[image_pair_index[1]]
+            first_image_filename, second_image_filename = first_image_path.split('/')[-1], second_image_path.split('/')[-1]
+
+            # Concatenate matched keypoints of an image pair and write it as a dataset
+            group = f.require_group(first_image_filename)
+            group.create_dataset(
+                second_image_filename,
+                data=np.concatenate([first_image_keypoints[matching_index], second_image_keypoints[matching_index]], axis=1)
+            )
+
+    keypoints = defaultdict(list)
+    match_indices = defaultdict(dict)
+    total_keypoints = defaultdict(int)
+
+    with h5py.File(output_directory / 'loftr_matches.h5', mode='r') as f:
+        for first_image_filename in f.keys():
+            group = f[first_image_filename]
+            for second_image_filename in group.keys():
+
+                image_pair_keypoints = group[second_image_filename][...]
+                keypoints[first_image_filename].append(image_pair_keypoints[:, :2])
+                keypoints[second_image_filename].append(image_pair_keypoints[:, 2:])
+                current_match = torch.arange(len(image_pair_keypoints)).reshape(-1, 1).repeat(1, 2)
+                current_match[:, 0] += total_keypoints[first_image_filename]
+                current_match[:, 1] += total_keypoints[second_image_filename]
+                total_keypoints[first_image_filename] += len(image_pair_keypoints)
+                total_keypoints[second_image_filename] += len(image_pair_keypoints)
+                match_indices[first_image_filename][second_image_filename] = current_match
+
+    for image_filename in keypoints.keys():
+        keypoints[image_filename] = np.round(np.concatenate(keypoints[image_filename], axis=0))
+
+    unique_keypoints = {}
+    unique_match_indices = {}
+    matches = defaultdict(dict)
+
+    for image_filename in keypoints.keys():
+        unique_keypoint_values, unique_keypoint_reverse_idx = torch.unique(torch.from_numpy(keypoints[image_filename]), dim=0, return_inverse=True)
+        unique_match_indices[image_filename] = unique_keypoint_reverse_idx
+        unique_keypoints[image_filename] = unique_keypoint_values.numpy()
+
+    for first_image_filename, group in match_indices.items():
+        for second_image_filename, image_pair_match_index in group.items():
+            image_pair_match_index_copy = deepcopy(image_pair_match_index)
+            image_pair_match_index_copy[:, 0] = unique_match_indices[first_image_filename][image_pair_match_index_copy[:, 0]]
+            image_pair_match_index_copy[:, 1] = unique_match_indices[second_image_filename][image_pair_match_index_copy[:, 1]]
+            matched_keypoints = np.concatenate([
+                unique_keypoints[first_image_filename][image_pair_match_index_copy[:, 0]],
+                unique_keypoints[second_image_filename][image_pair_match_index_copy[:, 1]]
+            ], axis=1)
+
+            current_unique_match_index = get_first_indices(torch.from_numpy(matched_keypoints), dim=0)
+            image_pair_match_index_copy_semiclean = image_pair_match_index_copy[current_unique_match_index]
+
+            current_unique_match_index1 = get_first_indices(image_pair_match_index_copy_semiclean[:, 0], dim=0)
+            image_pair_match_index_copy_semiclean = image_pair_match_index_copy_semiclean[current_unique_match_index1]
+
+            current_unique_match_index2 = get_first_indices(image_pair_match_index_copy_semiclean[:, 1], dim=0)
+            image_pair_match_index_copy_semiclean2 = image_pair_match_index_copy_semiclean[current_unique_match_index2]
+
+            matches[first_image_filename][second_image_filename] = image_pair_match_index_copy_semiclean2.numpy()
+
+    with h5py.File(output_directory / 'keypoints.h5', mode='w') as f:
+        for image_filename, keypoints in unique_keypoints.items():
+            f[image_filename] = keypoints
+
+    with h5py.File(output_directory / 'matches.h5', mode='w') as f:
+        for first_image_filename, first_image_matches in matches.items():
+            group = f.require_group(first_image_filename)
+            for second_image_filename, second_image_matches in first_image_matches.items():
+                group[second_image_filename] = second_image_matches
+
+
+def push_to_database(colmap_database, dataset_directory, image_directory, camera_model, single_camera):
+
+    """
+    Push cameras, images, keypoints and matches to COLMAP database
+
+    Parameters
+    ----------
+    colmap_database: COLMAPDatabase
+        COLMAP Database object
+
+    dataset_directory: str or pathlib.Path
+        Reconstruction directory
+
+    image_directory: str or pathlib.Path
+        Image directory
+
+    camera_model: str
+        Model of the camera
+
+    single_camera: bool
+        Whether there is one or multiple in cameras
+    """
+
+    keypoints_dataset = h5py.File(dataset_directory / 'keypoints.h5', 'r')
 
     camera_id = None
-    fname_to_id = {}
-    for filename in tqdm(list(keypoint_f.keys())):
-        keypoints = keypoint_f[filename][()]
+    image_filename_to_id = {}
 
-        fname_with_ext = filename# + img_ext
-        path = os.path.join(image_path, fname_with_ext)
-        if not os.path.isfile(path):
-            raise IOError(f'Invalid image path {path}')
+    for image_filename in tqdm(list(keypoints_dataset.keys())):
+
+        keypoints = keypoints_dataset[image_filename][()]
 
         if camera_id is None or not single_camera:
-            camera_id = create_camera(colmap_database, path, camera_model)
-        image_id = colmap_database.add_image(fname_with_ext, camera_id)
-        fname_to_id[filename] = image_id
 
-        colmap_database.add_keypoints(image_id, keypoints)
+            image = Image.open(str(image_directory / image_filename))
+            width, height = image.size
 
-    return fname_to_id
+            focal_length = camera_utilities.get_focal_length(image_path=str(image_directory / image_filename))
+
+            if camera_model == 'simple-pinhole':
+                model = 0
+                params = np.array([focal_length, width / 2, height / 2])
+            elif camera_model == 'pinhole':
+                model = 1
+                params = np.array([focal_length, focal_length, width / 2, height / 2])
+            elif camera_model == 'simple-radial':
+                model = 2
+                params = np.array([focal_length, width / 2, height / 2, 0.1])
+            elif camera_model == 'opencv':
+                model = 4
+                params = np.array([focal_length, focal_length, width / 2, height / 2, 0., 0., 0., 0.])
+            else:
+                raise ValueError(f'Invalid camera model: {camera_model}')
+
+            camera_id = colmap_database.add_camera(
+                camera_id=None,
+                model=model,
+                width=width,
+                height=height,
+                params=params,
+                prior_focal_length=False
+            )
+
+        image_id = colmap_database.add_image(image_id=None, name=image_filename, camera_id=camera_id)
+        image_filename_to_id[image_filename] = image_id
+
+        colmap_database.add_keypoints(image_id=image_id, keypoints=keypoints)
+
+    matches_dataset = h5py.File(dataset_directory / 'matches.h5', 'r')
+
+    pairs = set()
+
+    for image1_filename in matches_dataset.keys():
+        group = matches_dataset[image1_filename]
+        for image2_filename in group.keys():
+
+            image1_id = image_filename_to_id[image1_filename]
+            image2_id = image_filename_to_id[image2_filename]
+            pair_id = image_ids_to_pair_id(image1_id=image1_id, image2_id=image2_id)
+            if pair_id in pairs:
+                continue
+
+            matches = group[image2_filename][()]
+            colmap_database.add_matches(image1_id, image2_id, matches)
+            pairs.add(pair_id)
+
+    colmap_database.commit()
