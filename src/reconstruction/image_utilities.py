@@ -1,7 +1,31 @@
 import pathlib
 import cv2
-import torch
 import kornia
+
+
+def create_image_pairs(image_paths):
+
+    """
+    Create all possible image pairs from given list of image paths
+
+    Parameters
+    ----------
+    image_paths: list of shape (n_images)
+        List of image paths
+
+    Returns
+    -------
+    image_pair_indices: list of shape (n_image_pairs)
+        List of tuples of image pair indices
+    """
+
+    image_pair_indices = []
+
+    for i in range(len(image_paths)):
+        for j in range(i + 1, len(image_paths)):
+            image_pair_indices.append((i, j))
+
+    return image_pair_indices
 
 
 def resize_with_aspect_ratio(image, longest_edge):
@@ -25,7 +49,7 @@ def resize_with_aspect_ratio(image, longest_edge):
 
     height, width = image.shape[:2]
     scale = longest_edge / max(height, width)
-    image = cv2.resize(image, dsize=(int(width * scale), int(height * scale)), interpolation=cv2.INTER_NEAREST)
+    image = cv2.resize(image, dsize=(int(width * scale), int(height * scale)), interpolation=cv2.INTER_LANCZOS4)
 
     return image
 
@@ -69,7 +93,7 @@ def get_image_tensor(image_path_or_array, resize_shape, resize_longest_edge, sca
         image = resize_with_aspect_ratio(image=image, longest_edge=resize_shape)
     else:
         resize_shape = (resize_shape, resize_shape) if isinstance(resize_shape, int) else resize_shape
-        image = cv2.resize(image, resize_shape, interpolation=cv2.INTER_NEAREST)
+        image = cv2.resize(image, resize_shape, interpolation=cv2.INTER_LANCZOS4)
 
     if scale:
         image = image / 255.
