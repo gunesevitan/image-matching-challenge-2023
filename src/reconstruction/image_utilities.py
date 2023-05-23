@@ -78,6 +78,4 @@ def get_image_tensor(image_path_or_array, resize_shape, resize_longest_edge, sca
     if grayscale:
         image = kornia.color.rgb_to_grayscale(image)
 
-    image = torch.squeeze(image, dim=0)
-
     return image
