@@ -124,10 +124,10 @@ def match_images(first_images, second_images, model, device, amp):
             outputs = model(inputs)
 
     outputs = {
-        'keypoints0': outputs['keypoints0'].cpu().numpy(),
-        'keypoints1': outputs['keypoints1'].cpu().numpy(),
-        'confidence': outputs['confidence'].cpu().numpy(),
-        'batch_indexes': outputs['batch_indexes'].cpu().numpy()
+        'keypoints0': outputs['keypoints0'].detach().cpu().numpy(),
+        'keypoints1': outputs['keypoints1'].detach().cpu().numpy(),
+        'confidence': outputs['confidence'].detach().cpu().numpy(),
+        'batch_indexes': outputs['batch_indexes'].detach().cpu().numpy()
     }
 
     return outputs
