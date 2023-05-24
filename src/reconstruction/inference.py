@@ -7,19 +7,21 @@ from glob import glob
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
+import cv2
 import torch
 from kornia.feature import LoFTR
 import pycolmap
-import sqlite3
 
 sys.path.append('..')
 import settings
 import evaluation
-import visualization
-import datasets
+import image_utilities
 import image_selection
-import image_matching
+import loftr
+import superglue
+import database_utilities
+sys.path.append(str(settings.ROOT / 'venv' / 'lib' / 'python3.9' / 'site-packages' / 'SuperGluePretrainedNetwork'))
+from models.matching import Matching
 
 
 if __name__ == '__main__':
@@ -34,16 +36,20 @@ if __name__ == '__main__':
     # Load image selection model with specified configurations
     image_selection_device = torch.device(config['image_selection']['device'])
     image_selection_model = image_selection.load_feature_extractor(**config['image_selection']['model'])
-    image_selection_model.to(image_selection_device)
-    image_selection_model.eval()
+    image_selection_model = image_selection_model.eval().to(image_selection_device)
     image_selection_transforms = image_selection.create_image_selection_transforms(**config['image_selection']['transforms'])
 
-    # Load image matching model with specified configurations
+    # Load LoFTR model with specified configurations
     image_matching_device = torch.device(config['image_matching']['device'])
-    image_matching_model = LoFTR(config['image_matching']['pretrained'])
-    image_matching_model.to(image_matching_device)
-    image_matching_model.eval()
-    image_matching_transforms = config['image_matching']['transforms']
+    loftr_model = LoFTR(config['loftr']['pretrained'])
+    loftr_model.load_state_dict(torch.load(config['loftr']['pretrained_weights_path'])['state_dict'])
+    loftr_model = loftr_model.eval().to(image_matching_device)
+    loftr_transforms = config['loftr']['transforms']
+
+    # Load SuperPoint and SuperGlue model with specified configurations
+    superglue_model = Matching({'superglue': config['superglue'], 'superpoint': config['superpoint']})
+    superglue_model = superglue_model.eval().to(image_matching_device)
+    superglue_transforms = config['superglue']['transforms']
 
     reconstruction_root_directory = settings.MODELS / config['persistence']['root_directory']
     reconstruction_root_directory.mkdir(parents=True, exist_ok=True)
@@ -72,10 +78,16 @@ if __name__ == '__main__':
 
                 scene_directory = dataset_directory / scene
                 image_paths = sorted(glob(str(scene_directory / config['dataset'][dataset][scene]['image_directory'] / '*')))
+                scene_image_count = len(image_paths)
+                settings.logger.info(
+                    f'''
+                    Dataset: {dataset} - Scene: {scene}
+                    Image count: {scene_image_count}
+                    '''
+                )
 
                 scene_reconstruction_directory = reconstruction_root_directory / dataset / scene
                 scene_reconstruction_directory.mkdir(parents=True, exist_ok=True)
-                database_path = scene_reconstruction_directory / 'database.db'
 
                 for file_or_directory in os.listdir(scene_reconstruction_directory):
                     # Remove files and directories from the previous reconstruction
@@ -85,14 +97,13 @@ if __name__ == '__main__':
                     elif file_or_directory_path.is_dir():
                         shutil.rmtree(file_or_directory_path)
 
-                scene_image_count = len(image_paths)
-                settings.logger.info(
-                    f'''
-                    Dataset: {dataset} - Scene: {scene}
-                    Image count: {scene_image_count}
-                    '''
-                )
+                # Create COLMAP database and its tables for the current reconstruction
+                database_path = scene_reconstruction_directory / 'database.db'
+                database_uri = f'file:{database_path}?mode=rwc'
+                colmap_database = database_utilities.COLMAPDatabase.connect(database_uri, uri=True)
+                colmap_database.create_tables()
 
+                # Select images if scene image count is above the specified threshold
                 if scene_image_count > config['image_selection']['image_count']:
 
                     image_selection_data_loader = image_selection.prepare_dataloader(
@@ -116,65 +127,75 @@ if __name__ == '__main__':
                         image_selection_features.append(batch_image_selection_features)
 
                     image_selection_features = torch.cat(image_selection_features, dim=0).numpy()
+
+                    # Select images with the highest mean cosine similarity because they are more likely to be registered
                     image_paths = image_selection.select_images(
                         image_paths=image_paths,
                         image_selection_features=image_selection_features,
                         image_count=config['image_selection']['image_count']
                     )
-
-                    del image_selection_device, image_selection_model, image_selection_transforms, image_selection_data_loader, image_selection_features
                     settings.logger.info(f'Selected most similar {len(image_paths)} images')
 
-                image_pair_indices = image_matching.create_image_pairs(image_paths=image_paths)
-                image_matching_data_loader = image_matching.prepare_dataloader(
-                    image_paths=image_paths,
-                    image_pair_indices=image_pair_indices,
-                    transforms=image_matching_transforms,
-                    batch_size=config['image_matching']['batch_size'],
-                    num_workers=config['image_matching']['num_workers']
-                )
+                    del image_selection_device, image_selection_model, image_selection_transforms, image_selection_data_loader, image_selection_features
+
+                # Create brute force image pairs from image paths
+                image_pair_indices = image_utilities.create_image_pairs(image_paths=image_paths)
                 first_image_keypoints = []
                 second_image_keypoints = []
-                confidences = []
 
-                for idx, (first_images, second_images) in enumerate(tqdm(image_matching_data_loader)):
+                for image_pair_idx, (first_image_idx, second_image_idx) in enumerate(tqdm(image_pair_indices)):
 
-                    first_images = first_images.to(image_matching_device)
-                    second_images = second_images.to(image_matching_device)
-                    outputs = image_matching.match_images(
-                        first_images=first_images,
-                        second_images=second_images,
-                        model=image_matching_model,
+                    image1 = cv2.imread(str(image_paths[image_pair_indices[image_pair_idx][0]]))
+                    image1 = cv2.cvtColor(image1, cv2.COLOR_BGR2RGB)
+
+                    image2 = cv2.imread(str(image_paths[image_pair_indices[image_pair_idx][1]]))
+                    image2 = cv2.cvtColor(image2, cv2.COLOR_BGR2RGB)
+
+                    loftr_outputs = loftr.match_images(
+                        image1=image1,
+                        image2=image2,
+                        model=loftr_model,
                         device=image_matching_device,
-                        amp=False
+                        amp=False,
+                        transforms=loftr_transforms
                     )
 
-                    for batch_index in np.unique(outputs['batch_indexes']):
-                        batch_mask = outputs['batch_indexes'] == batch_index
-                        first_image_keypoints.append(outputs['keypoints0'][batch_mask])
-                        second_image_keypoints.append(outputs['keypoints1'][batch_mask])
-                        confidences.append(outputs['confidence'][batch_mask])
+                    superglue_outputs = superglue.match_images(
+                        image1=image1,
+                        image2=image2,
+                        model=superglue_model,
+                        device=image_matching_device,
+                        amp=False,
+                        transforms=superglue_transforms
+                    )
 
-                del image_matching_device, image_matching_model, image_matching_transforms, image_matching_data_loader
-                settings.logger.info(f'Finished matching {len(image_pair_indices)} image pairs')
+                    image1_keypoints = np.concatenate([
+                        loftr_outputs['keypoints0'],
+                        superglue_outputs['keypoints0']
+                    ])
 
-                
-                exit()
-                # TODO: Push keypoints to COLMAP database
-                # Find max image size from selected image sizes
-                max_image_size = df.loc[(df['scene'] == scene) & (df['image_id'].isin(image_list)), ['image_height', 'image_width']].values.min()
-                max_image_size = 1400
+                    image2_keypoints = np.concatenate([
+                        loftr_outputs['keypoints1'],
+                        superglue_outputs['keypoints1']
+                    ])
 
-                sift_extraction_options = pycolmap.SiftExtractionOptions(**config['sift_extraction'])
-                sift_extraction_options.max_image_size = int(max_image_size)
+                    first_image_keypoints.append(image1_keypoints)
+                    second_image_keypoints.append(image2_keypoints)
 
-                pycolmap.extract_features(
-                    database_path=database_path,
-                    image_path=scene_directory / 'images',
-                    image_list=image_list,
-                    sift_options=sift_extraction_options,
-                    device=pycolmap.Device(config['colmap']['device']),
-                    verbose=True
+                database_utilities.write_matches(
+                    image_paths=image_paths,
+                    image_pair_indices=image_pair_indices,
+                    first_image_keypoints=first_image_keypoints,
+                    second_image_keypoints=second_image_keypoints,
+                    output_directory=scene_reconstruction_directory
+                )
+
+                database_utilities.push_to_database(
+                    colmap_database=colmap_database,
+                    dataset_directory=scene_reconstruction_directory,
+                    image_directory=scene_directory / 'images',
+                    camera_model='simple-radial',
+                    single_camera=True
                 )
 
                 sift_matching_options = pycolmap.SiftMatchingOptions(**config['sift_matching'])
@@ -236,13 +257,6 @@ if __name__ == '__main__':
 
                     df.loc[idx, 'rotation_matrix_prediction'] = ';'.join([str(x) for x in rotation_matrix_prediction.reshape(-1)])
                     df.loc[idx, 'translation_vector_prediction'] = ';'.join([str(x) for x in translation_vector_prediction.reshape(-1)])
-
-                con = sqlite3.connect(database_path)
-                cursor = con.cursor()
-                # [('cameras',), ('sqlite_sequence',), ('images',), ('keypoints',), ('descriptors',), ('matches',), ('two_view_geometries',)]
-                df_db = pd.read_sql_query("SELECT * FROM keypoints", con)
-
-                break
 
         df = df.dropna(subset=['rotation_matrix_prediction', 'translation_vector_prediction'])
 
