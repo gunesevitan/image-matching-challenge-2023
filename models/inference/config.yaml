@@ -1,0 +1,150 @@
+dataset:
+  haiper:
+    bike:
+      image_directory: images
+    chairs:
+      image_directory: images
+    fountain:
+      image_directory: images
+  heritage:
+    dioscuri:
+      image_directory: images
+    cyprus:
+      image_directory: images
+    wall:
+      image_directory: images
+  urban:
+   kyiv-puppet-theater:
+     image_directory: images
+
+image_selection:
+  image_count: 50
+  model:
+    model_name: convnext_base
+    pretrained: True
+    model_args: {}
+  transforms:
+    resize_height: 512
+    resize_width: 512
+    normalize_mean: [0.485, 0.456, 0.406]
+    normalize_std: [0.229, 0.224, 0.225]
+    normalize_max_pixel_value: 255
+  pooling_type: avg
+  amp: False
+  batch_size: 16
+  num_workers: 16
+  device: cuda
+
+loftr:
+  pretrained: null
+  pretrained_weights_path: /home/gunes/Desktop/Kaggle/image-matching-challenge-2023/models/loftr/loftr_outdoor.ckpt
+  transforms:
+    resize_shape: 840
+    resize_longest_edge: True
+    scale: True
+    grayscale: True
+
+superglue:
+  superpoint:
+    descriptor_dim: 256
+    nms_radius: 3
+    keypoint_threshold: 0.005
+    max_keypoints: 2048
+    remove_borders: 4
+  superglue:
+    descriptor_dim: 256
+    weights: outdoor
+    keypoint_encoder: [32, 64, 128, 256]
+    sinkhorn_iterations: 100
+    match_threshold: 0.2
+  transforms:
+    resize_shape: 840
+    resize_longest_edge: True
+    scale: True
+    grayscale: True
+
+image_matching:
+  amp: False
+  batch_size: 1
+  num_workers: 16
+  device: cuda
+
+colmap:
+  device: cpu
+
+sift_extraction:
+  num_threads: 16
+  max_image_size: 1400
+  max_num_features: 8192
+  first_octave: -1
+  num_octaves: 4
+  octave_resolution: 3
+  peak_threshold: 0.0066
+  edge_threshold: 10
+  estimate_affine_shape: False
+  max_num_orientations: 2
+  upright: False
+  darkness_adaptivity: False
+  domain_size_pooling: True
+  dsp_min_scale: 0.16
+  dsp_max_scale: 3
+  dsp_num_scales: 10
+  normalization: 'L2'
+
+sift_matching:
+  num_threads: 16
+  max_ratio: 0.9
+  max_distance: 0.7
+  cross_check: True
+  max_num_matches: 32768
+  max_error: 1.0
+  confidence: 0.9
+  min_num_trials: 100
+  max_num_trials: 10000
+  min_inlier_ratio: 0.25
+  min_num_inliers: 15
+  multiple_models: False
+  guided_matching: False
+  planar_scene: False
+
+exhaustive_matching:
+  block_size: 50
+
+incremental_mapper:
+  min_num_matches: 5
+  ignore_watermarks: False
+  multiple_models: True
+  max_num_models: 50
+  max_model_overlap: 20
+  min_model_size: 10
+  init_image_id1: -1
+  init_image_id2: -1
+  init_num_trials: 200
+  extract_colors: False
+  num_threads: -1
+  min_focal_length_ratio: 0.1
+  max_focal_length_ratio: 10.0
+  max_extra_param: 1.0
+  ba_refine_focal_length: True
+  ba_refine_principal_point: False
+  ba_refine_extra_params: True
+  ba_min_num_residuals_for_multi_threading: 50000
+  ba_local_num_images: 6
+  ba_local_function_tolerance: 0.0
+  ba_local_max_num_iterations: 25
+  ba_global_use_pba: False
+  ba_global_pba_gpu_index: -1
+  ba_global_images_ratio: 1.1
+  ba_global_points_ratio: 1.1
+  ba_global_images_freq: 500
+  ba_global_points_freq: 250000
+  ba_global_function_tolerance: 0.0
+  ba_global_max_num_iterations: 50
+  ba_local_max_refinements: 2
+  ba_local_max_refinement_change: 0.001
+  ba_global_max_refinements: 5
+  ba_global_max_refinement_change: 0.0005
+  fix_existing_images: False
+
+persistence:
+  root_directory: inference
