@@ -1,90 +1,64 @@
 import torch
-from torch.utils.data import DataLoader, SequentialSampler
 
-import datasets
-
-
-def prepare_dataloader(image_paths, image_pair_indices, transforms, batch_size, num_workers):
-
-    """
-    Prepare data loader for inference
-
-    Parameters
-    ----------
-    image_paths: list of shape (n_images)
-        List of image paths
-
-    image_pair_indices: list of shape (n_image_pairs)
-        List of tuples of image pair indices
-
-    transforms: dict
-        Transform pipeline
-
-    batch_size: int
-        Batch size of the data loader
-
-    num_workers: int
-        Number of workers of the data loader
-
-    Returns
-    -------
-    data_loader: torch.utils.data.DataLoader
-        Data loader
-    """
-
-    dataset = datasets.ImagePairDataset(
-        image_paths=image_paths,
-        image_pair_indices=image_pair_indices,
-        transforms=transforms
-    )
-    data_loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        sampler=SequentialSampler(dataset),
-        pin_memory=False,
-        drop_last=False,
-        num_workers=num_workers
-    )
-
-    return data_loader
+import image_utilities
 
 
-def match_images(first_images, second_images, model, device, amp):
+def match_images(image1, image2, model, device, amp, transforms):
 
     """
     Match given two images with each other using LoFTR model
 
     Parameters
     ----------
-    first_images: torch.Tensor of shape (batch_size, 1, height, width)
+    image1: numpy.ndarray of shape (3, height, width)
         Batch of first images tensor
 
-    second_images: torch.Tensor of shape (batch_size, 1, height, width)
+    image2: numpy.ndarray of shape (3, height, width)
         Batch of second images tensor
 
     model: torch.nn.Module
         LoFTR Model
 
     device: torch.device
-        Location of the first_images, second_images and the model
+        Location of the image1, image2 and the model
 
     amp: bool
         Whether to use auto mixed precision or not
 
+    transforms: dict
+        Dictionary of transform parameters
+
     Returns
     -------
-    outputs: dict of {
-        keypoints1: numpy.ndarray of shape (n_keypoints, 2)
-        keypoints2: numpy.ndarray of shape (n_keypoints, 2)
-        confidences: numpy.ndarray of shape (n_keypoints)
-        batch_indexes: numpy.ndarray of shape (n_keypoints)
-    }
-        Matched keypoints from first and second images, confidences and batch indexes
+    outputs: dict
+        Model outputs
     """
 
+    image1_raw_height, image1_raw_width = image1.shape[:2]
+    image1 = image_utilities.get_image_tensor(
+        image_path_or_array=image1,
+        resize_shape=transforms['resize_shape'],
+        resize_longest_edge=transforms['resize_longest_edge'],
+        scale=transforms['scale'],
+        grayscale=transforms['grayscale']
+    )
+    image1 = image1.to(device)
+    image1_transformed_height, image1_transformed_width = image1.shape[2:]
+
+    image2_raw_height, image2_raw_width = image2.shape[:2]
+    image2 = image_utilities.get_image_tensor(
+        image_path_or_array=image2,
+        resize_shape=transforms['resize_shape'],
+        resize_longest_edge=transforms['resize_longest_edge'],
+        scale=transforms['scale'],
+        grayscale=transforms['grayscale']
+    )
+    image2 = image2.to(device)
+    image2_transformed_height, image2_transformed_width = image2.shape[2:]
+
     inputs = {
-        'image0': first_images,
-        'image1': second_images
+        'image0': image1,
+        'image1': image2
     }
 
     with torch.no_grad():
@@ -100,5 +74,10 @@ def match_images(first_images, second_images, model, device, amp):
         'confidence': outputs['confidence'].detach().cpu().numpy(),
         'batch_indexes': outputs['batch_indexes'].detach().cpu().numpy()
     }
+
+    outputs['keypoints0'][:, 0] *= image1_raw_width / image1_transformed_width
+    outputs['keypoints0'][:, 1] *= image1_raw_height / image1_transformed_height
+    outputs['keypoints1'][:, 0] *= image2_raw_width / image2_transformed_width
+    outputs['keypoints1'][:, 1] *= image2_raw_height / image2_transformed_height
 
     return outputs
