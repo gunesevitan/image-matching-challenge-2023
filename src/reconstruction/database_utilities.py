@@ -395,9 +395,12 @@ def write_matches(image_paths, image_pair_indices, first_image_keypoints, second
             image_pair_match_index_copy[:, 0] = unique_match_indices[first_image_filename][image_pair_match_index_copy[:, 0]]
             image_pair_match_index_copy[:, 1] = unique_match_indices[second_image_filename][image_pair_match_index_copy[:, 1]]
             matched_keypoints = np.concatenate([
-                unique_keypoints[first_image_filename][image_pair_match_index_copy[:, 0]],
-                unique_keypoints[second_image_filename][image_pair_match_index_copy[:, 1]]
+                unique_keypoints[first_image_filename][image_pair_match_index_copy[:, 0]].reshape(-1, 2),
+                unique_keypoints[second_image_filename][image_pair_match_index_copy[:, 1]].reshape(-1, 2)
             ], axis=1)
+
+            if matched_keypoints.shape[0] == 0:
+                continue
 
             current_unique_match_index = get_first_indices(torch.from_numpy(matched_keypoints), dim=0)
             image_pair_match_index_copy_semiclean = image_pair_match_index_copy[current_unique_match_index]
