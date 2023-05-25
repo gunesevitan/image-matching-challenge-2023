@@ -33,12 +33,6 @@ if __name__ == '__main__':
 
     config = yaml.load(open(settings.MODELS / args.model_directory / 'config.yaml', 'r'), Loader=yaml.FullLoader)
 
-    # Load image selection model with specified configurations
-    image_selection_device = torch.device(config['image_selection']['device'])
-    image_selection_model = image_selection.load_feature_extractor(**config['image_selection']['model'])
-    image_selection_model = image_selection_model.eval().to(image_selection_device)
-    image_selection_transforms = image_selection.create_image_selection_transforms(**config['image_selection']['transforms'])
-
     # Load LoFTR model with specified configurations
     image_matching_device = torch.device(config['image_matching']['device'])
     loftr_model = LoFTR(config['loftr']['pretrained'])
@@ -47,7 +41,7 @@ if __name__ == '__main__':
     loftr_transforms = config['loftr']['transforms']
 
     # Load SuperPoint and SuperGlue model with specified configurations
-    superglue_model = Matching({'superglue': config['superglue'], 'superpoint': config['superpoint']})
+    superglue_model = Matching(config['superglue'])
     superglue_model = superglue_model.eval().to(image_matching_device)
     superglue_transforms = config['superglue']['transforms']
 
@@ -105,38 +99,47 @@ if __name__ == '__main__':
 
                 # Select images if scene image count is above the specified threshold
                 if scene_image_count > config['image_selection']['image_count']:
+                    if config['image_selection']['criteria'] == 'similarity':
+                        # Load image selection model with specified configurations
+                        image_selection_device = torch.device(config['image_selection']['device'])
+                        image_selection_model = image_selection.load_feature_extractor(**config['image_selection']['model'])
+                        image_selection_model = image_selection_model.eval().to(image_selection_device)
+                        image_selection_transforms = image_selection.create_image_selection_transforms(**config['image_selection']['transforms'])
 
-                    image_selection_data_loader = image_selection.prepare_dataloader(
-                        image_paths=image_paths,
-                        transforms=image_selection_transforms,
-                        batch_size=config['image_selection']['batch_size'],
-                        num_workers=config['image_selection']['num_workers']
-                    )
-                    image_selection_features = []
-
-                    for idx, inputs in enumerate(tqdm(image_selection_data_loader)):
-
-                        inputs = inputs.to(image_selection_device)
-                        batch_image_selection_features = image_selection.extract_features(
-                            inputs=inputs,
-                            model=image_selection_model,
-                            pooling_type=config['image_selection']['pooling_type'],
-                            device=image_selection_device,
-                            amp=config['image_selection']['amp']
+                        image_selection_data_loader = image_selection.prepare_dataloader(
+                            image_paths=image_paths,
+                            transforms=image_selection_transforms,
+                            batch_size=config['image_selection']['batch_size'],
+                            num_workers=config['image_selection']['num_workers']
                         )
-                        image_selection_features.append(batch_image_selection_features)
+                        image_selection_features = []
 
-                    image_selection_features = torch.cat(image_selection_features, dim=0).numpy()
+                        for idx, inputs in enumerate(tqdm(image_selection_data_loader)):
+                            inputs = inputs.to(image_selection_device)
+                            batch_image_selection_features = image_selection.extract_features(
+                                inputs=inputs,
+                                model=image_selection_model,
+                                pooling_type=config['image_selection']['pooling_type'],
+                                device=image_selection_device,
+                                amp=config['image_selection']['amp']
+                            )
+                            image_selection_features.append(batch_image_selection_features)
 
-                    # Select images with the highest mean cosine similarity because they are more likely to be registered
-                    image_paths = image_selection.select_images(
-                        image_paths=image_paths,
-                        image_selection_features=image_selection_features,
-                        image_count=config['image_selection']['image_count']
-                    )
-                    settings.logger.info(f'Selected most similar {len(image_paths)} images')
-
-                    del image_selection_device, image_selection_model, image_selection_transforms, image_selection_data_loader, image_selection_features
+                        image_selection_features = torch.cat(image_selection_features, dim=0).numpy()
+                        # Select images with the highest mean cosine similarity because they are more likely to be registered
+                        image_paths = image_selection.select_images(
+                            image_paths=image_paths,
+                            image_selection_features=image_selection_features,
+                            image_count=config['image_selection']['image_count']
+                        )
+                        settings.logger.info(f'Selected most similar {len(image_paths)} images')
+                        del image_selection_device, image_selection_model, image_selection_transforms, image_selection_data_loader, image_selection_features
+                    elif config['image_selection']['criteria'] == 'step_size':
+                        # Select images with step size
+                        step_size = int(np.ceil(len(image_paths) / config['image_selection']['image_count']))
+                        image_paths = image_paths[::step_size]
+                    else:
+                        raise ValueError(f'Invalid image selection criteria {config["image_selection"]["criteria"]}')
 
                 # Create brute force image pairs from image paths
                 image_pair_indices = image_utilities.create_image_pairs(image_paths=image_paths)
@@ -151,15 +154,6 @@ if __name__ == '__main__':
                     image2 = cv2.imread(str(image_paths[image_pair_indices[image_pair_idx][1]]))
                     image2 = cv2.cvtColor(image2, cv2.COLOR_BGR2RGB)
 
-                    loftr_outputs = loftr.match_images(
-                        image1=image1,
-                        image2=image2,
-                        model=loftr_model,
-                        device=image_matching_device,
-                        amp=False,
-                        transforms=loftr_transforms
-                    )
-
                     superglue_outputs = superglue.match_images(
                         image1=image1,
                         image2=image2,
@@ -169,18 +163,8 @@ if __name__ == '__main__':
                         transforms=superglue_transforms
                     )
 
-                    image1_keypoints = np.concatenate([
-                        loftr_outputs['keypoints0'],
-                        superglue_outputs['keypoints0']
-                    ])
-
-                    image2_keypoints = np.concatenate([
-                        loftr_outputs['keypoints1'],
-                        superglue_outputs['keypoints1']
-                    ])
-
-                    first_image_keypoints.append(image1_keypoints)
-                    second_image_keypoints.append(image2_keypoints)
+                    first_image_keypoints.append(superglue_outputs['keypoints0'])
+                    second_image_keypoints.append(superglue_outputs['keypoints1'])
 
                 database_utilities.write_matches(
                     image_paths=image_paths,
@@ -251,12 +235,27 @@ if __name__ == '__main__':
                     if row['image_id'] in registered_images:
                         rotation_matrix_prediction = registered_images[row['image_id']].rotmat()
                         translation_vector_prediction = registered_images[row['image_id']].tvec
+                        df.loc[idx, 'rotation_matrix_prediction'] = ';'.join([str(x) for x in rotation_matrix_prediction.reshape(-1)])
+                        df.loc[idx, 'translation_vector_prediction'] = ';'.join([str(x) for x in translation_vector_prediction.reshape(-1)])
                     else:
-                        rotation_matrix_prediction = np.zeros((3, 3))
-                        translation_vector_prediction = np.zeros((3, 1))
+                        df.loc[idx, 'rotation_matrix_prediction'] = np.nan
+                        df.loc[idx, 'translation_vector_prediction'] = np.nan
 
-                    df.loc[idx, 'rotation_matrix_prediction'] = ';'.join([str(x) for x in rotation_matrix_prediction.reshape(-1)])
-                    df.loc[idx, 'translation_vector_prediction'] = ';'.join([str(x) for x in translation_vector_prediction.reshape(-1)])
+                # Fill unregistered images rotation matrices with the prediction mean or zeros
+                scene_rotation_matrix_predictions = df.loc[df['scene'] == scene, 'rotation_matrix_prediction'].dropna().apply(lambda x: np.array(str(x).split(';'), dtype=np.float64).reshape(1, 3, 3)).values
+                if scene_rotation_matrix_predictions.shape[0] == 0:
+                    rotation_matrix_fill_value = np.zeros((3, 3))
+                else:
+                    rotation_matrix_fill_value = np.mean(np.concatenate(scene_rotation_matrix_predictions, axis=0), axis=0)
+                df.loc[(df['scene'] == scene) & (df['rotation_matrix_prediction'].isnull()), 'rotation_matrix_prediction'] = ';'.join([str(x) for x in rotation_matrix_fill_value.reshape(-1)])
+
+                # Fill unregistered images translation vectors with the prediction mean or zeros
+                scene_translation_vector_predictions = df.loc[df['scene'] == scene, 'translation_vector_prediction'].dropna().apply(lambda x: np.array(str(x).split(';'), dtype=np.float64).reshape(1, 3)).values
+                if scene_translation_vector_predictions.shape[0] == 0:
+                    translation_vector_fill_value = np.zeros((3, 1))
+                else:
+                    translation_vector_fill_value = np.mean(np.concatenate(scene_translation_vector_predictions, axis=0), axis=0)
+                df.loc[(df['scene'] == scene) & (df['translation_vector_prediction'].isnull()), 'translation_vector_prediction'] = ';'.join([str(x) for x in translation_vector_fill_value.reshape(-1)])
 
         df = df.dropna(subset=['rotation_matrix_prediction', 'translation_vector_prediction'])
 
