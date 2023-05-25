@@ -54,7 +54,7 @@ def resize_with_aspect_ratio(image, longest_edge):
     return image
 
 
-def get_image_tensor(image_path_or_array, resize_shape, resize_longest_edge, scale, grayscale):
+def get_image_tensor(image_path_or_array, resize, resize_shape, resize_longest_edge, scale, grayscale):
 
     """
     Load image and preprocess it
@@ -63,6 +63,9 @@ def get_image_tensor(image_path_or_array, resize_shape, resize_longest_edge, sca
     ----------
     image_path_or_array: str or numpy.ndarray of shape (height, width, 3)
         Image path or image array
+
+    resize: bool
+        Whether to resize the image or not
 
     resize_shape: tuple or int
         Tuple of image height and width or number of pixels for both height and width
@@ -89,11 +92,12 @@ def get_image_tensor(image_path_or_array, resize_shape, resize_longest_edge, sca
     else:
         image = image_path_or_array
 
-    if resize_longest_edge:
-        image = resize_with_aspect_ratio(image=image, longest_edge=resize_shape)
-    else:
-        resize_shape = (resize_shape, resize_shape) if isinstance(resize_shape, int) else resize_shape
-        image = cv2.resize(image, resize_shape, interpolation=cv2.INTER_LANCZOS4)
+    if resize:
+        if resize_longest_edge:
+            image = resize_with_aspect_ratio(image=image, longest_edge=resize_shape)
+        else:
+            resize_shape = (resize_shape, resize_shape) if isinstance(resize_shape, int) else resize_shape
+            image = cv2.resize(image, resize_shape, interpolation=cv2.INTER_LANCZOS4)
 
     if scale:
         image = image / 255.
