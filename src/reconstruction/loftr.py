@@ -3,7 +3,7 @@ import torch
 import image_utilities
 
 
-def match_images(image1, image2, model, device, amp, transforms):
+def match_images(image1, image2, model, device, amp, transforms, confidence_threshold):
 
     """
     Match given two images with each other using LoFTR model
@@ -27,6 +27,9 @@ def match_images(image1, image2, model, device, amp, transforms):
 
     transforms: dict
         Dictionary of transform parameters
+
+    confidence_threshold: float or int
+        Confidence threshold
 
     Returns
     -------
@@ -76,6 +79,24 @@ def match_images(image1, image2, model, device, amp, transforms):
         'confidence': outputs['confidence'].detach().cpu().numpy(),
         'batch_indexes': outputs['batch_indexes'].detach().cpu().numpy()
     }
+
+    if confidence_threshold is not None:
+        if isinstance(confidence_threshold, float):
+            # Select keypoints above given confidence threshold
+            confidence_mask = outputs['confidence'] >= confidence_threshold
+        elif isinstance(confidence_threshold, int):
+            # Select keypoints dynamically based on confidence distribution
+            confidence_mean, confidence_std = outputs['confidence'].mean(), outputs['confidence'].std()
+            confidence_mask = outputs['confidence'] >= (confidence_mean + (confidence_std * confidence_threshold))
+        else:
+            raise ValueError(f'Invalid confidence_threshold {confidence_threshold}')
+
+        outputs = {
+            'keypoints0': outputs['keypoints0'][confidence_mask],
+            'keypoints1': outputs['keypoints1'][confidence_mask],
+            'confidence': outputs['confidence'][confidence_mask],
+            'batch_indexes': outputs['batch_indexes'][confidence_mask]
+        }
 
     outputs['keypoints0'][:, 0] *= image1_raw_width / image1_transformed_width
     outputs['keypoints0'][:, 1] *= image1_raw_height / image1_transformed_height
