@@ -6,7 +6,7 @@ import image_utilities
 def match_images(image1, image2, model, device, amp, transforms):
 
     """
-    Match given two images with each other using LoFTR model
+    Match given two images with each other using SuperGlue model
 
     Parameters
     ----------
