@@ -3,7 +3,7 @@ import torch
 import image_utilities
 
 
-def match_images(image1, image2, model, device, amp, transforms, confidence_threshold):
+def match_images(image1, image2, model, device, amp, transforms, score_threshold, top_k):
 
     """
     Match given two images with each other using SuperGlue model
@@ -28,8 +28,11 @@ def match_images(image1, image2, model, device, amp, transforms, confidence_thre
     transforms: dict
         Dictionary of transform parameters
 
-    confidence_threshold: float or int
+    score_threshold: float or int
         Confidence threshold
+
+    top_k: int
+        Number of keypoints to take
 
     Returns
     -------
@@ -94,19 +97,25 @@ def match_images(image1, image2, model, device, amp, transforms, confidence_thre
     for k in ['keypoints0', 'scores0', 'descriptors0', 'matches0', 'matching_scores0']:
         outputs[k] = outputs[k][matches_mask]
 
-    if confidence_threshold is not None:
-        if isinstance(confidence_threshold, float):
-            # Select keypoints above given confidence threshold
-            confidence_mask = outputs['matching_scores0'] >= confidence_threshold
-        elif isinstance(confidence_threshold, int):
-            # Select keypoints dynamically based on confidence distribution
-            confidence_mean, confidence_std = outputs['matching_scores0'].mean(), outputs['matching_scores0'].std()
-            confidence_mask = outputs['matching_scores0'] >= (confidence_mean + (confidence_std * confidence_threshold))
+    if score_threshold is not None:
+        if isinstance(score_threshold, float):
+            # Select keypoints above given score threshold
+            score_mask = outputs['matching_scores0'] >= score_threshold
+        elif isinstance(score_threshold, int):
+            # Select keypoints dynamically based on score distribution
+            score_mean, score_std = outputs['matching_scores0'].mean(), outputs['matching_scores0'].std()
+            score_mask = outputs['matching_scores0'] >= (score_mean + (score_std * score_threshold))
         else:
-            raise ValueError(f'Invalid confidence_threshold {confidence_threshold}')
+            raise ValueError(f'Invalid score_threshold {score_threshold}')
 
         for k in outputs.keys():
-            outputs[k] = outputs[k][confidence_mask]
+            outputs[k] = outputs[k][score_mask]
+
+    if top_k is not None:
+        # Select top-k keypoints based on their scores
+        sorting_idx = outputs['matching_scores0'].argsort()[-top_k:]
+        for k in outputs.keys():
+            outputs[k] = outputs[k][sorting_idx]
 
     outputs['keypoints0'][:, 0] *= image1_raw_width / image1_transformed_width
     outputs['keypoints0'][:, 1] *= image1_raw_height / image1_transformed_height
