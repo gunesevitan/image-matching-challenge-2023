@@ -37,6 +37,7 @@ def match_images(image1, image2, model, device, amp, transforms):
     image1_raw_height, image1_raw_width = image1.shape[:2]
     image1 = image_utilities.get_image_tensor(
         image_path_or_array=image1,
+        resize=transforms['resize'],
         resize_shape=transforms['resize_shape'],
         resize_longest_edge=transforms['resize_longest_edge'],
         scale=transforms['scale'],
@@ -48,6 +49,7 @@ def match_images(image1, image2, model, device, amp, transforms):
     image2_raw_height, image2_raw_width = image2.shape[:2]
     image2 = image_utilities.get_image_tensor(
         image_path_or_array=image2,
+        resize=transforms['resize'],
         resize_shape=transforms['resize_shape'],
         resize_longest_edge=transforms['resize_longest_edge'],
         scale=transforms['scale'],
