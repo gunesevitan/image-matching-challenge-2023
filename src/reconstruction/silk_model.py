@@ -9,7 +9,7 @@ import silk
 from silk.backbones.silk.silk import from_feature_coords_to_image_coords
 
 
-def match_images(image1, image2, model, device, amp, transforms, top_k):
+def match_images(image1, image2, model, matcher_parameters, device, amp, transforms, top_k):
 
     """
     Match given two images with each other using SiLK model
@@ -17,13 +17,16 @@ def match_images(image1, image2, model, device, amp, transforms, top_k):
     Parameters
     ----------
     image1: numpy.ndarray of shape (3, height, width)
-        Batch of first images tensor
+        Array of first image
 
     image2: numpy.ndarray of shape (3, height, width)
-        Batch of second images tensor
+        Array of second image
 
     model: torch.nn.Module
         SiLK Model
+
+    matcher_parameters: dict
+        Dictionary of matcher parameters
 
     device: torch.device
         Location of the image1, image2 and the model
@@ -83,7 +86,7 @@ def match_images(image1, image2, model, device, amp, transforms, top_k):
     descriptors1 = descriptors1.detach().cpu().numpy()
 
     if top_k is not None:
-        # Select top-k keypoints based on their scores
+        # Select top-k keypoints and descriptors based on their scores
         sorting_idx = keypoints1[:, 2].argsort()[-top_k:]
         keypoints1 = keypoints1[sorting_idx]
         descriptors1 = descriptors1[sorting_idx]
@@ -104,7 +107,7 @@ def match_images(image1, image2, model, device, amp, transforms, top_k):
     descriptors2 = descriptors2.detach().cpu().numpy()
 
     if top_k is not None:
-        # Select top-k keypoints based on their scores
+        # Select top-k keypoints and descriptors based on their scores
         sorting_idx = keypoints2[:, 2].argsort()[-top_k:]
         keypoints2 = keypoints2[sorting_idx]
         descriptors2 = descriptors2[sorting_idx]
@@ -114,11 +117,7 @@ def match_images(image1, image2, model, device, amp, transforms, top_k):
     keypoints2[:, 0] *= image2_raw_height / image2_transformed_height
     keypoints2[:, 1] *= image2_raw_width / image2_transformed_width
 
-    matcher = silk.models.silk.matcher(
-        postprocessing='double-softmax',
-        threshold=0.99,
-        temperature=0.1,
-    )
+    matcher = silk.models.silk.matcher(**matcher_parameters)
 
     with torch.no_grad():
         matches = matcher(torch.as_tensor(descriptors1), torch.as_tensor(descriptors2))
