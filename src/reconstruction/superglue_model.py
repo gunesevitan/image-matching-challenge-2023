@@ -72,7 +72,10 @@ def match_images(image1, image2, model, device, amp, transforms, score_threshold
             outputs = model({'image0': image1, 'image1': image2})
 
     for k in outputs.keys():
-        outputs[k] = outputs[k][0].detach().cpu().numpy()
+        if k == 'descriptors0' or k == 'descriptors1':
+            outputs[k] = outputs[k][0].detach().cpu().numpy().T
+        else:
+            outputs[k] = outputs[k][0].detach().cpu().numpy()
 
     matches_mask = outputs['matches0'] > -1
 
