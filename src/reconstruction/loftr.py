@@ -11,10 +11,10 @@ def match_images(image1, image2, model, device, amp, transforms, confidence_thre
     Parameters
     ----------
     image1: numpy.ndarray of shape (3, height, width)
-        Batch of first images tensor
+        Array of first image
 
     image2: numpy.ndarray of shape (3, height, width)
-        Batch of second images tensor
+        Array of second image
 
     model: torch.nn.Module
         LoFTR Model
