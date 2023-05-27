@@ -11,10 +11,10 @@ def match_images(image1, image2, model, device, amp, transforms, score_threshold
     Parameters
     ----------
     image1: numpy.ndarray of shape (3, height, width)
-        Batch of first images tensor
+        Array of first image
 
     image2: numpy.ndarray of shape (3, height, width)
-        Batch of second images tensor
+        Array of second image
 
     model: torch.nn.Module
         SuperGlue Model
@@ -64,30 +64,15 @@ def match_images(image1, image2, model, device, amp, transforms, score_threshold
     image2 = image2.to(device)
     image2_transformed_height, image2_transformed_width = image2.shape[2:]
 
-    inputs = {
-        'image0': image1,
-        'image1': image2
-    }
-
     with torch.no_grad():
         if amp:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                outputs = model(inputs)
+                outputs = model({'image0': image1, 'image1': image2})
         else:
-            outputs = model(inputs)
+            outputs = model({'image0': image1, 'image1': image2})
 
-    outputs = {
-        'keypoints0': outputs['keypoints0'][0].detach().cpu().numpy(),
-        'scores0': outputs['scores0'][0].detach().cpu().numpy(),
-        'descriptors0': outputs['descriptors0'][0].detach().cpu().numpy().T,
-        'keypoints1': outputs['keypoints1'][0].detach().cpu().numpy(),
-        'scores1': outputs['scores1'][0].detach().cpu().numpy(),
-        'descriptors1': outputs['descriptors1'][0].detach().cpu().numpy().T,
-        'matches0': outputs['matches0'][0].detach().cpu().numpy(),
-        'matches1': outputs['matches1'][0].detach().cpu().numpy(),
-        'matching_scores0': outputs['matching_scores0'][0].detach().cpu().numpy(),
-        'matching_scores1': outputs['matching_scores1'][0].detach().cpu().numpy(),
-    }
+    for k in outputs.keys():
+        outputs[k] = outputs[k][0].detach().cpu().numpy()
 
     matches_mask = outputs['matches0'] > -1
 
@@ -99,7 +84,7 @@ def match_images(image1, image2, model, device, amp, transforms, score_threshold
 
     if score_threshold is not None:
         if isinstance(score_threshold, float):
-            # Select keypoints above given score threshold
+            # Select matched keypoints with above given score threshold
             score_mask = outputs['matching_scores0'] >= score_threshold
         elif isinstance(score_threshold, int):
             # Select keypoints dynamically based on score distribution
