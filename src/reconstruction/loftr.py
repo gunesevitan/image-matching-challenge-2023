@@ -3,7 +3,7 @@ import torch
 import image_utilities
 
 
-def match_images(image1, image2, model, device, amp, transforms, confidence_threshold):
+def match_images(image1, image2, model, device, amp, transforms, confidence_threshold, top_k):
 
     """
     Match given two images with each other using LoFTR model
@@ -29,7 +29,10 @@ def match_images(image1, image2, model, device, amp, transforms, confidence_thre
         Dictionary of transform parameters
 
     confidence_threshold: float or int
-        Confidence threshold
+        Confidence threshold to filter out low confidence matches
+
+    top_k: int
+        Number of matches to take
 
     Returns
     -------
@@ -61,28 +64,19 @@ def match_images(image1, image2, model, device, amp, transforms, confidence_thre
     image2 = image2.to(device)
     image2_transformed_height, image2_transformed_width = image2.shape[2:]
 
-    inputs = {
-        'image0': image1,
-        'image1': image2
-    }
-
     with torch.no_grad():
         if amp:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                outputs = model(inputs)
+                outputs = model({'image0': image1, 'image1': image2})
         else:
-            outputs = model(inputs)
+            outputs = model({'image0': image1, 'image1': image2})
 
-    outputs = {
-        'keypoints0': outputs['keypoints0'].detach().cpu().numpy(),
-        'keypoints1': outputs['keypoints1'].detach().cpu().numpy(),
-        'confidence': outputs['confidence'].detach().cpu().numpy(),
-        'batch_indexes': outputs['batch_indexes'].detach().cpu().numpy()
-    }
+    for k in outputs.keys():
+        outputs[k] = outputs[k].detach().cpu().numpy()
 
     if confidence_threshold is not None:
         if isinstance(confidence_threshold, float):
-            # Select keypoints above given confidence threshold
+            # Select matched keypoints with above given confidence threshold
             confidence_mask = outputs['confidence'] >= confidence_threshold
         elif isinstance(confidence_threshold, int):
             # Select keypoints dynamically based on confidence distribution
@@ -91,12 +85,14 @@ def match_images(image1, image2, model, device, amp, transforms, confidence_thre
         else:
             raise ValueError(f'Invalid confidence_threshold {confidence_threshold}')
 
-        outputs = {
-            'keypoints0': outputs['keypoints0'][confidence_mask],
-            'keypoints1': outputs['keypoints1'][confidence_mask],
-            'confidence': outputs['confidence'][confidence_mask],
-            'batch_indexes': outputs['batch_indexes'][confidence_mask]
-        }
+        for k in outputs.keys():
+            outputs[k] = outputs[k][confidence_mask]
+
+    if top_k is not None:
+        # Select top-k keypoints based on their confidences
+        sorting_idx = outputs['matching_scores0'].argsort()[-top_k:]
+        for k in outputs.keys():
+            outputs[k] = outputs[k][sorting_idx]
 
     outputs['keypoints0'][:, 0] *= image1_raw_width / image1_transformed_width
     outputs['keypoints0'][:, 1] *= image1_raw_height / image1_transformed_height
