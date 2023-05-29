@@ -5,9 +5,13 @@ import kornia
 from kornia.feature import laf_from_center_scale_ori
 from kornia_moons.feature import draw_LAF_matches
 import matplotlib.pyplot as plt
+from hloc.utils import viz_3d
+import pycolmap
+
+import settings
 
 
-def visualize_image(image_path_or_array, path=None):
+def visualize_image(image_path_or_array, keypoints=None, path=None):
 
     """
     Visualize image
@@ -30,6 +34,48 @@ def visualize_image(image_path_or_array, path=None):
 
     fig, ax = plt.subplots(figsize=(16, 16))
     ax.imshow(image)
+
+    if keypoints is not None:
+        ax.scatter(keypoints[:, 0], keypoints[:, 1], s=5, c='red')
+
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    ax.tick_params(axis='x', labelsize=15, pad=10)
+    ax.tick_params(axis='y', labelsize=15, pad=10)
+
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path)
+        plt.close(fig)
+
+
+def visualize_crop(image_path_or_array, keypoints=None, path=None):
+
+    """
+    Visualize image
+
+    Parameters
+    ----------
+    image_path_or_array: str or numpy.ndarray of shape (height, width, 3)
+        Image path or image array
+
+    path: path-like str or None
+        Path of the output file or None (if path is None, plot is displayed with selected backend)
+    """
+
+    if isinstance(image_path_or_array, pathlib.Path) or isinstance(image_path_or_array, str):
+        # Read image from the given path if image_path_or_array is a path-like string
+        image = cv2.imread(str(image_path_or_array))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    else:
+        image = image_path_or_array
+
+    fig, ax = plt.subplots(figsize=(16, 16))
+    ax.imshow(image)
+
+    if keypoints is not None:
+        ax.scatter(keypoints[:, 0], keypoints[:, 1], s=5, c='red')
 
     ax.set_xlabel('')
     ax.set_ylabel('')
@@ -129,8 +175,8 @@ def visualize_image_matching(image1, image2, keypoints1, keypoints2, inliers, pa
             torch.ones(keypoints2.shape[0]).view(1, -1, 1)
          ),
         tent_idxs=torch.arange(keypoints1.shape[0]).view(-1, 1).repeat(1, 2),
-        img1=kornia.tensor_to_image(image1),
-        img2=kornia.tensor_to_image(image2),
+        img1=image1,
+        img2=image2,
         inlier_mask=inliers,
         draw_dict={
             'inlier_color': (0.2, 1, 0.2),
@@ -144,3 +190,24 @@ def visualize_image_matching(image1, image2, keypoints1, keypoints2, inliers, pa
         plt.show()
     else:
         plt.savefig(path)
+
+
+def visualize_reconstruction(reconstruction):
+
+    fig = viz_3d.init_figure()
+    viz_3d.plot_reconstruction(fig, reconstruction, color='rgba(0,0,255,0.5)', name="Reconstruction", cs=5, cameras=False)
+    viz_3d.plot_reconstruction(fig, reconstruction, color='rgba(255,0,0,0.5)', name="Reconstruction", cs=5, points=False)
+    fig.show()
+
+
+if __name__ == '__main__':
+
+
+    from glob import glob
+
+    dataset = 'urban'
+    scene = 'kyiv-puppet-theater'
+
+
+    #images = [cv2.cvtColor(cv2.imread(im), cv2.COLOR_BGR2RGB) for im in glob(f'{src}/images/*')]
+

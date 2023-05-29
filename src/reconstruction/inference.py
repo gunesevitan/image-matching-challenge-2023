@@ -15,6 +15,7 @@ import pycolmap
 sys.path.append('..')
 import settings
 import evaluation
+import visualization
 import image_utilities
 import image_selection
 import loftr_model
@@ -175,16 +176,16 @@ if __name__ == '__main__':
                     image2 = cv2.imread(str(image_paths[image_pair_indices[image_pair_idx][1]]))
                     image2 = cv2.cvtColor(image2, cv2.COLOR_BGR2RGB)
 
-                    loftr_outputs = loftr_model.match_images(
-                        image1=image1,
-                        image2=image2,
-                        model=loftr,
-                        device=image_matching_device,
-                        amp=config['image_matching']['amp'],
-                        transforms=loftr_transforms,
-                        confidence_threshold=config['loftr']['confidence_threshold'],
-                        top_k=config['loftr']['top_k']
-                    )
+                    #loftr_outputs = loftr_model.match_images(
+                    #    image1=image1,
+                    #    image2=image2,
+                    #    model=loftr,
+                    #    device=image_matching_device,
+                    #    amp=config['image_matching']['amp'],
+                    #    transforms=loftr_transforms,
+                    #    confidence_threshold=config['loftr']['confidence_threshold'],
+                    #    top_k=config['loftr']['top_k']
+                    #)
 
                     superglue_outputs = superglue_model.match_images(
                         image1=image1,
@@ -196,9 +197,49 @@ if __name__ == '__main__':
                         score_threshold=config['superglue']['score_threshold'],
                         top_k=config['superglue']['top_k']
                     )
+                    import ransac
+                    f, inliers = ransac.get_fundamental_matrix(superglue_outputs['keypoints0'], superglue_outputs['keypoints1'])
 
-                    k0 = np.concatenate([superglue_outputs['keypoints0'], loftr_outputs['keypoints0']], axis=0)
-                    k1 = np.concatenate([superglue_outputs['keypoints1'], loftr_outputs['keypoints1']], axis=0)
+                    visualization.visualize_image_matching(
+                        image1,
+                        image2,
+                        superglue_outputs['keypoints0'],
+                        superglue_outputs['keypoints1'],
+                        inliers
+                    )
+
+                    image1_cropped, x_offset1, y_offset1 = superglue_model.make_crop(image1, superglue_outputs['keypoints0'])
+                    image2_cropped, x_offset2, y_offset2 = superglue_model.make_crop(image2, superglue_outputs['keypoints1'])
+
+                    superglue_cropped_outputs = superglue_model.match_images(
+                        image1=image1_cropped,
+                        image2=image2_cropped,
+                        model=superglue,
+                        device=image_matching_device,
+                        amp=config['image_matching']['amp'],
+                        transforms=superglue_transforms,
+                        score_threshold=config['superglue']['score_threshold'],
+                        top_k=config['superglue']['top_k']
+                    )
+
+
+                    superglue_cropped_outputs['keypoints0'][:, 0] += x_offset1
+                    superglue_cropped_outputs['keypoints0'][:, 1] += y_offset1
+                    superglue_cropped_outputs['keypoints1'][:, 0] += x_offset2
+                    superglue_cropped_outputs['keypoints1'][:, 1] += y_offset2
+                    _, inliers = ransac.get_fundamental_matrix(superglue_cropped_outputs['keypoints0'], superglue_cropped_outputs['keypoints1'])
+
+                    visualization.visualize_image_matching(
+                        image1,
+                        image2,
+                        superglue_cropped_outputs['keypoints0'],
+                        superglue_cropped_outputs['keypoints1'],
+                        inliers
+                    )
+                    exit()
+
+                    #k0 = np.concatenate([superglue_outputs['keypoints0'], loftr_outputs['keypoints0']], axis=0)
+                    #k1 = np.concatenate([superglue_outputs['keypoints1'], loftr_outputs['keypoints1']], axis=0)
 
                     first_image_keypoints.append(k0)
                     second_image_keypoints.append(k1)
