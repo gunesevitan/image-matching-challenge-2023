@@ -1,24 +1,25 @@
 dataset:
-  haiper:
-    bike:
-      image_directory: images
-    chairs:
-      image_directory: images
-    fountain:
-      image_directory: images
-  heritage:
-    dioscuri:
-      image_directory: images
-    cyprus:
-      image_directory: images
-    wall:
-      image_directory: images
+  #haiper:
+  #  bike:
+  #    image_directory: images
+  #  chairs:
+  #    image_directory: images
+  #  fountain:
+  #    image_directory: images
+  #heritage:
+  #  dioscuri:
+  #    image_directory: images
+  #  cyprus:
+  #    image_directory: images
+  #  wall:
+  #    image_directory: images
   urban:
    kyiv-puppet-theater:
      image_directory: images
 
 image_selection:
   image_count: 50
+  criteria: step_size
   model:
     model_name: convnext_base
     pretrained: True
@@ -39,17 +40,20 @@ loftr:
   pretrained: null
   pretrained_weights_path: /home/gunes/Desktop/Kaggle/image-matching-challenge-2023/models/loftr/loftr_outdoor.ckpt
   transforms:
+    resize: True
     resize_shape: 840
     resize_longest_edge: True
     scale: True
     grayscale: True
+  confidence_threshold: null
+  top_k: null
 
 superglue:
   superpoint:
     descriptor_dim: 256
-    nms_radius: 3
-    keypoint_threshold: 0.005
-    max_keypoints: 2048
+    nms_radius: 4
+    keypoint_threshold: 0.01
+    max_keypoints: -1
     remove_borders: 4
   superglue:
     descriptor_dim: 256
@@ -58,10 +62,62 @@ superglue:
     sinkhorn_iterations: 100
     match_threshold: 0.2
   transforms:
-    resize_shape: 840
-    resize_longest_edge: True
+    resize: False
+    resize_shape: null
+    resize_longest_edge: null
     scale: True
     grayscale: True
+  score_threshold: null
+  top_k: null
+
+lfdd:
+  lfdd:
+    orientation_module_name: Pass
+    orientation_module_parameters: {}
+    orientation_module_weights_path: null
+    affine_module_name: LAFAffNetShapeEstimator
+    affine_module_parameters:
+      preserve_orientation: True
+    affine_module_weights_path: /home/gunes/Desktop/Kaggle/image-matching-challenge-2023/models/lfdd/affnet.pth
+    detector_module_name: KeyNetDetector
+    detector_module_parameters:
+      num_features: 2048
+    detector_module_weights_path: /home/gunes/Desktop/Kaggle/image-matching-challenge-2023/models/lfdd/keynet.pth
+    descriptor_module_name: HardNet8
+    descriptor_module_parameters: {}
+    descriptor_module_weights_path: /home/gunes/Desktop/Kaggle/image-matching-challenge-2023/models/lfdd/hardnet8v2.pt
+  descriptor_matcher:
+    match_mode: snn
+    th: 0.90
+  distance_threshold: null
+  top_k: null
+  transforms:
+    resize: False
+    resize_shape: null
+    resize_longest_edge: null
+    scale: True
+    grayscale: True
+
+disk:
+  disk:
+    desc_dim: 128
+  pretrained_weights_path: /home/gunes/Desktop/Kaggle/image-matching-challenge-2023/models/disk/depth-save.pth
+  model_parameters:
+    n: 2048
+    window_size: 5
+    score_threshold: 0
+    pad_if_not_divisible: True
+  descriptor_matcher:
+    match_mode: snn
+    th: 0.95
+  distance_threshold: null
+  top_k: null
+  transforms:
+    resize: False
+    resize_shape: null
+    resize_longest_edge: null
+    scale: True
+    grayscale: False
 
 image_matching:
   amp: False
@@ -85,7 +141,7 @@ sift_extraction:
   max_num_orientations: 2
   upright: False
   darkness_adaptivity: False
-  domain_size_pooling: True
+  domain_size_pooling: False
   dsp_min_scale: 0.16
   dsp_max_scale: 3
   dsp_num_scales: 10
@@ -103,7 +159,7 @@ sift_matching:
   max_num_trials: 10000
   min_inlier_ratio: 0.25
   min_num_inliers: 15
-  multiple_models: False
+  multiple_models: True
   guided_matching: False
   planar_scene: False
 
@@ -116,7 +172,7 @@ incremental_mapper:
   multiple_models: True
   max_num_models: 50
   max_model_overlap: 20
-  min_model_size: 10
+  min_model_size: 3
   init_image_id1: -1
   init_image_id2: -1
   init_num_trials: 200
