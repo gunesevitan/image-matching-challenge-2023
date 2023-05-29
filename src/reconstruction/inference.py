@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import torch
-from kornia.feature import LoFTR
+from kornia.feature import LoFTR, DISK, DescriptorMatcher
 import pycolmap
 
 sys.path.append('..')
@@ -17,8 +17,10 @@ import settings
 import evaluation
 import image_utilities
 import image_selection
-import loftr
-import superglue
+import loftr_model
+import superglue_model
+import lfdd_model
+import disk_model
 import database_utilities
 sys.path.append(str(settings.ROOT / 'venv' / 'lib' / 'python3.9' / 'site-packages' / 'SuperGluePretrainedNetwork'))
 from models.matching import Matching
@@ -35,15 +37,26 @@ if __name__ == '__main__':
 
     # Load LoFTR model with specified configurations
     image_matching_device = torch.device(config['image_matching']['device'])
-    loftr_model = LoFTR(config['loftr']['pretrained'])
-    loftr_model.load_state_dict(torch.load(config['loftr']['pretrained_weights_path'])['state_dict'])
-    loftr_model = loftr_model.eval().to(image_matching_device)
+    loftr = LoFTR(config['loftr']['pretrained'])
+    loftr.load_state_dict(torch.load(config['loftr']['pretrained_weights_path'])['state_dict'])
+    loftr = loftr.eval().to(image_matching_device)
     loftr_transforms = config['loftr']['transforms']
 
     # Load SuperPoint and SuperGlue model with specified configurations
-    superglue_model = Matching(config['superglue'])
-    superglue_model = superglue_model.eval().to(image_matching_device)
+    superglue = Matching(config['superglue'])
+    superglue = superglue.eval().to(image_matching_device)
     superglue_transforms = config['superglue']['transforms']
+
+    # Load Local Faeture Detector Descriptor mdoel with specified configurations
+    lfdd = lfdd_model.LocalFeatureDetectorDescriptor(**config['lfdd']['lfdd'])
+    lfdd = lfdd.eval().to(image_matching_device)
+    lfdd_transforms = config['lfdd']['transforms']
+    lfdd_matcher = DescriptorMatcher(**config['lfdd']['descriptor_matcher'])
+
+    disk = DISK()
+    disk.load_state_dict(torch.load(config['disk']['pretrained_weights_path'])['extractor'])
+    disk = disk.eval().to(image_matching_device)
+    matcher = DescriptorMatcher(**config['disk']['descriptor_matcher'])
 
     reconstruction_root_directory = settings.MODELS / config['persistence']['root_directory']
     reconstruction_root_directory.mkdir(parents=True, exist_ok=True)
@@ -141,6 +154,12 @@ if __name__ == '__main__':
                     else:
                         raise ValueError(f'Invalid image selection criteria {config["image_selection"]["criteria"]}')
 
+                scene_max_image_size = df.loc[df['scene'] == scene, ['image_height', 'image_width']].max().max()
+                if scene_max_image_size > 2000:
+                    superglue_transforms['resize'] = True
+                else:
+                    superglue_transforms['resize'] = False
+
                 # Create brute force image pairs from image paths
                 image_pair_indices = image_utilities.create_image_pairs(image_paths=image_paths)
                 first_image_keypoints = []
@@ -154,14 +173,34 @@ if __name__ == '__main__':
                     image2 = cv2.imread(str(image_paths[image_pair_indices[image_pair_idx][1]]))
                     image2 = cv2.cvtColor(image2, cv2.COLOR_BGR2RGB)
 
-                    superglue_outputs = superglue.match_images(
+                    superglue_outputs = superglue_model.match_images(
                         image1=image1,
                         image2=image2,
-                        model=superglue_model,
+                        model=superglue,
                         device=image_matching_device,
-                        amp=False,
-                        transforms=superglue_transforms
+                        amp=config['image_matching']['amp'],
+                        transforms=superglue_transforms,
+                        score_threshold=config['superglue']['score_threshold'],
+                        top_k=config['superglue']['top_k']
                     )
+
+                    #lfdd_outputs = lfdd_model.match_images(
+                    #    image1=image1,
+                    #    image2=image2,
+                    #    model=lfdd,
+                    #    matcher=lfdd_matcher,
+                    #    device=image_matching_device,
+                    #    amp=config['image_matching']['amp'],
+                    #    transforms=lfdd_transforms,
+                    #    distance_threshold=config['lfdd']['distance_threshold'],
+                    #    top_k=config['lfdd']['top_k']
+                    #)
+
+                    #k0 = np.concatenate([superglue_outputs['keypoints0'], lfdd_outputs['keypoints0']], axis=0)
+                    #k1 = np.concatenate([superglue_outputs['keypoints1'], lfdd_outputs['keypoints1']], axis=0)
+
+                    #first_image_keypoints.append(k0)
+                    #second_image_keypoints.append(k1)
 
                     first_image_keypoints.append(superglue_outputs['keypoints0'])
                     second_image_keypoints.append(superglue_outputs['keypoints1'])
@@ -222,7 +261,7 @@ if __name__ == '__main__':
                     f'''
                     Dataset: {dataset} - Scene: {scene}
                     Reconstruction count: {len(reconstructions)}
-                    Best reconstruction registered image count: {best_registered_image_count}
+                    Best reconstruction registered image count: {best_registered_image_count}/{scene_image_count}
                     '''
                 )
 
