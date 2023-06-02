@@ -1,52 +1,6 @@
-import numpy as np
-import pandas as pd
 import torch
 
 import image_utilities
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import MinMaxScaler
-
-
-def make_crop(image, keypoints, perc_points=0.85, pad=5):
-    norm_keypoints = MinMaxScaler().fit_transform(keypoints)
-    total = len(keypoints)
-    best_dist = 1
-    best_clusters = None
-    best_asm = None
-    for eps in [0.01, 0.025, 0.05, 0.1, 0.2]:
-        clusters = DBSCAN(eps=eps).fit_predict(norm_keypoints)
-        counts = pd.Series(clusters).value_counts().sort_values(ascending=False)
-        counts = counts[counts.index > -1]
-        if len(counts) == 0:
-            continue
-
-        cumsums = np.cumsum(counts.values) / total
-        dists = np.abs(cumsums - perc_points)
-        best_ix = np.argmin(dists)
-
-        if dists[best_ix] < best_dist:
-            best_dist = dists[best_ix]
-            best_clusters = list(counts.head(best_ix + 1).index)
-            best_asm = clusters
-
-    mask = np.isin(best_asm, best_clusters)
-
-    miny = int(np.min(keypoints[mask][:, 1]))
-    miny = max(miny - pad, 0)
-
-    maxy = int(np.max(keypoints[mask][:, 1]))
-    maxy = min(maxy + pad, image.shape[0])
-
-    minx = int(np.min(keypoints[mask][:, 0]))
-    minx = max(minx - pad, 0)
-
-    maxx = int(np.max(keypoints[mask][:, 0]))
-    maxx = min(maxx + pad, image.shape[1])
-
-    #keypoints[:, 0] -= minx
-    #keypoints[:, 1] -= miny
-
-    return image[miny:maxy + 1, minx:maxx + 1, :], minx, miny
 
 
 def match_images(image1, image2, model, device, amp, transforms, score_threshold, top_k):
@@ -74,10 +28,10 @@ def match_images(image1, image2, model, device, amp, transforms, score_threshold
     transforms: dict
         Dictionary of transform parameters
 
-    score_threshold: float or int
+    score_threshold: float, int or None
         Confidence threshold
 
-    top_k: int
+    top_k: int or None
         Number of keypoints to take
 
     Returns
