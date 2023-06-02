@@ -346,7 +346,7 @@ def write_matches(image_paths, image_pair_indices, first_image_keypoints, second
         Path of the output directory
     """
 
-    with h5py.File(output_directory / 'loftr_matches.h5', mode='w') as f:
+    with h5py.File(output_directory / 'model_matches.h5', mode='w') as f:
         for matching_index, image_pair_index in enumerate(image_pair_indices):
             first_image_path, second_image_path = image_paths[image_pair_index[0]], image_paths[image_pair_index[1]]
             first_image_filename, second_image_filename = first_image_path.split('/')[-1], second_image_path.split('/')[-1]
@@ -362,11 +362,10 @@ def write_matches(image_paths, image_pair_indices, first_image_keypoints, second
     match_indices = defaultdict(dict)
     total_keypoints = defaultdict(int)
 
-    with h5py.File(output_directory / 'loftr_matches.h5', mode='r') as f:
+    with h5py.File(output_directory / 'model_matches.h5', mode='r') as f:
         for first_image_filename in f.keys():
             group = f[first_image_filename]
             for second_image_filename in group.keys():
-
                 image_pair_keypoints = group[second_image_filename][...]
                 keypoints[first_image_filename].append(image_pair_keypoints[:, :2])
                 keypoints[second_image_filename].append(image_pair_keypoints[:, 2:])
@@ -499,7 +498,6 @@ def push_to_database(colmap_database, dataset_directory, image_directory, camera
     for image1_filename in matches_dataset.keys():
         group = matches_dataset[image1_filename]
         for image2_filename in group.keys():
-
             image1_id = image_filename_to_id[image1_filename]
             image2_id = image_filename_to_id[image2_filename]
             pair_id = image_ids_to_pair_id(image1_id=image1_id, image2_id=image2_id)
