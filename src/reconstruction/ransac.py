@@ -8,17 +8,31 @@ def get_fundamental_matrix(keypoints1, keypoints2, method=cv2.USAC_MAGSAC, ransa
 
     Parameters
     ----------
-    keypoints1 (numpy.ndarray of shape (n_keypoints, 2)): Keypoints from first image
-    keypoints2 (numpy.ndarray of shape (n_keypoints, 2)): Keypoints from second image
-    method (int): OpenCV method flag for computing the fundamental matrix
-    ransac_reproj_threshold (float): Maximum distance from a point to an epipolar line in pixels
-    confidence (float): Desirable level of confidence that estimated matrix is correct
-    max_iters (int): Number of iterations
+    keypoints1: numpy.ndarray of shape (n_keypoints, 2)
+        Keypoints extracted from the first image
+
+    keypoints2: numpy.ndarray of shape (n_keypoints, 2)
+        Keypoints extracted from the second image
+
+    method: int
+        OpenCV method flag for computing the fundamental matrix
+
+    ransac_reproj_threshold: float
+        Maximum distance from a point to an epipolar line in pixels
+
+    confidence: float
+        Desirable level of confidence that estimated matrix is correct
+
+    max_iters: int
+        Number of iterations
 
     Returns
     -------
-    fundamental_matrix (numpy.ndarray of shape (3, 3)): Array of fundamental matrix
-    inliers (numpy.ndarray of shape (n_keypoints)): Inlier mask
+    fundamental_matrix: numpy.ndarray of shape (3, 3)
+        Array of fundamental matrix
+
+    inliers: numpy.ndarray of shape (n_keypoints)
+        Inlier match mask
     """
 
     fundamental_matrix, inliers = cv2.findFundamentalMat(
